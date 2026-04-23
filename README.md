@@ -1,23 +1,24 @@
-# Evaluacion de Pasantias
+# Internship Competency Assessment System (ICAS) 🎓
 
-Base inicial para una aplicacion web con React + Vite + Tailwind y backend pensado para Supabase.
+## 📋 Descripción del Proyecto
+[cite_start]Este sistema está diseñado para la gestión y seguimiento de evaluaciones de estudiantes en programas de pasantías técnicas (undécimo y duodécimo año)[cite: 10]. [cite_start]Su objetivo principal es la generación de **Tarjetas Digitales de Competencia** que validan si el estudiante posee las habilidades necesarias para integrarse al sector empresarial[cite: 9, 10].
 
-## Estructura
+[cite_start]El sistema implementa un modelo de evaluación cíclico cada dos meses, permitiendo la retroalimentación constante antes de la asignación definitiva de pasantías[cite: 10].
 
-- `src/features/gradebook`: pantalla principal de evaluacion por etapa.
-- `src/components/ui`: base de componentes estilo Shadcn/UI.
-- `supabase/schema.sql`: modelo de datos, enums, RLS y tablas principales.
+## 🛠️ Stack Tecnológico
+- **Frontend:** React + Vite (Modularidad y rapidez).
+- **Styling:** Tailwind CSS + Shadcn/UI (Interfaz densa y profesional).
+- **Backend/DB:** Supabase / PostgreSQL (Arquitectura relacional y RLS).
+- [cite_start]**Infraestructura:** Servidor institucional con dominio propio[cite: 33, 34].
 
-## Ejecutar
+## 🏗️ Arquitectura de Datos (Mermaid)
+[cite_start]Como el sistema maneja múltiples especialidades y grupos[cite: 16], la estructura lógica se define de la siguiente manera:
 
-```bash
-npm install
-npm run dev
-```
-
-## Notas de implementacion
-
-- La tabla permite pegar bloques tabulados desde Excel o Google Sheets.
-- Las notas arrancan en `3` por defecto y se limitan entre `1` y `3`.
-- El cierre de etapa cambia la UI a solo lectura para representar el bloqueo permanente.
-- El payload mostrado en pantalla modela el `upsert` que luego debe conectarse a Supabase.
+```mermaid
+erDiagram
+    ESPECIALIDAD ||--o{ GRUPO : contiene
+    GRUPO ||--o{ ESTUDIANTE : tiene
+    PROFESOR ||--o{ GRUPO : administra
+    ESTUDIANTE ||--o{ EVALUACION : recibe
+    EVALUACION ||--o{ CALIFICACION : detalle
+    HABILIDAD ||--o{ CALIFICACION : medida_por
