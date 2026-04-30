@@ -261,6 +261,26 @@ alter table public.evaluations enable row level security;
 alter table public.evaluation_scores enable row level security;
 alter table public.notification_queue enable row level security;
 
+grant usage on schema public to authenticated;
+
+grant select on table
+  public.profiles,
+  public.specialties,
+  public.student_groups,
+  public.group_teachers,
+  public.students,
+  public.guardians,
+  public.student_guardians,
+  public.stages,
+  public.skills,
+  public.rubrics,
+  public.evaluations,
+  public.evaluation_scores
+to authenticated;
+
+grant insert, update on table public.evaluations to authenticated;
+grant insert, update on table public.evaluation_scores to authenticated;
+
 create policy "profiles self or orientadora"
 on public.profiles
 for select

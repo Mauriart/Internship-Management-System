@@ -51,6 +51,12 @@ export default function App() {
       setIsLoading(true);
       setLoadError("");
 
+      const { data: userResult, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      if (!userResult?.user) {
+        throw new Error("Debes iniciar sesion para consultar grupos y evaluaciones.");
+      }
+
       const { data: groups, error: groupsError } = await supabase
         .from("student_groups")
         .select("id, code, label, school_year, specialty_id, specialties(name)")
@@ -89,12 +95,6 @@ export default function App() {
       if (skillsError) throw skillsError;
       if (stageError) throw stageError;
       if (!stage) throw new Error("No hay una etapa abierta configurada.");
-
-      const { data: userResult, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!userResult?.user) {
-        throw new Error("Debes iniciar sesion para crear o consultar evaluaciones.");
-      }
 
       const studentIds = (students ?? []).map((student) => student.id);
       let evaluations = [];
