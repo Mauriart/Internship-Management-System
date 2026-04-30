@@ -1,0 +1,242 @@
+Resumen Técnico
+
+Proyecto frontend en React + Vite conectado a Supabase. La app usa Supabase como backend para autenticación, lectura/escritura de datos, RLS y persistencia de evaluaciones.
+
+APIs Usadas
+
+Supabase Auth:
+
+supabase.auth.signInWithPassword({ email, password })
+Usado para login con correo y contraseña.
+
+supabase.auth.signOut()
+Usado para cerrar sesión.
+
+supabase.auth.getUser()
+Usado para validar el usuario actual antes de consultar datos protegidos.
+
+supabase.auth.onAuthStateChange(...)
+Usado para detectar login/logout en la app.
+
+Cliente Supabase:
+
+createClient(url, anonKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+})
+La sesión no se persiste. Al recargar, se pide login otra vez.
+
+Tablas Principales
+
+profiles
+
+Guarda usuarios internos de la app. Debe existir un registro por cada usuario de Supabase Auth.
+
+Campos clave:
+
+id uuid references auth.users(id)
+full_name text
+email text
+role app_role
+Roles actuales:
+
+'orientadora'
+'profesor'
+'estudiante'
+'encargado'
+student_groups
+
+Grupos de estudiantes.
+
+code
+label
+school_year
+specialty_id
+max_students
+group_teachers
+
+Asignación profesor-grupo.
+
+group_id
+teacher_profile_id
+is_primary
+starts_on
+ends_on
+students
+
+Estudiantes.
+
+student_code
+full_name
+email
+specialty_id
+group_id
+guardians
+
+Encargados/padres.
+
+full_name
+email
+phone
+student_guardians
+
+Relación estudiante-encargado.
+
+stages
+
+Etapas de evaluación. La app busca:
+
+.eq("is_open", true)
+skills
+
+Habilidades blandas y cognitivas. La app carga habilidades activas:
+
+.eq("is_active", true)
+y filtra:
+
+specialty_id is null OR specialty_id = group.specialty_id
+evaluations
+
+Evaluación por estudiante y etapa.
+
+Restricción importante:
+
+unique (student_id, stage_id)
+La app crea o reutiliza una evaluación por estudiante cuando se carga el grupo.
+
+evaluation_scores
+
+Puntajes por evaluación/habilidad.
+
+PK:
+
+primary key (evaluation_id, skill_id)
+La app guarda con:
+
+supabase.from("evaluation_scores").upsert(
+  { evaluation_id, skill_id, score },
+  { onConflict: "evaluation_id,skill_id" }
+)
+Flujo De La App
+
+Login:
+
+Usuario entra con email/password.
+Se obtiene usuario con auth.getUser().
+Se busca su perfil en profiles.
+Si role = 'orientadora', entra a vista admin.
+Si role = 'profesor', entra a matriz de evaluación.
+Vista profesor:
+
+Lee grupos visibles por RLS desde student_groups.
+Selecciona el primer grupo disponible.
+Lee estudiantes de ese grupo.
+Lee habilidades activas.
+Lee etapa abierta.
+Busca evaluaciones existentes.
+Crea evaluaciones faltantes.
+Guarda en estado:
+{
+  [studentId]: evaluationId
+}
+Al hacer click en puntaje, hace upsert en evaluation_scores.
+Vista admin:
+
+Puede:
+
+Ver todos los grupos.
+Ver estudiantes dentro de cada grupo.
+Crear grupos.
+Asignar profesor a grupo al crear grupo.
+Registrar profesores en profiles y group_teachers.
+Registrar estudiantes con encargado.
+Eliminar estudiantes.
+Nota importante: el admin no crea usuarios Auth directamente. Primero se crea el usuario en Supabase Auth desde Dashboard, luego se pega su UUID en el formulario para registrar profesor.
+
+Archivos Clave
+
+Cliente Supabase:
+
+src/lib/supabase.js
+App principal, auth, admin, profesor, formularios:
+
+src/App.jsx
+Adaptadores de datos para la matriz:
+
+src/features/gradebook/utils/gradebook.js
+Schema y RLS:
+
+supabase/schema.sql
+Seed demo:
+
+supabase/seed.sql
+Mocks temporales:
+
+src/lib/mock-data.js
+Variables De Entorno
+
+En .env:
+
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+Deben empezar con VITE_ porque Vite solo expone esas variables al frontend.
+
+RLS Y Seguridad
+
+La seguridad real está en Supabase, no en frontend.
+
+Funciones importantes:
+
+public.current_profile_role()
+public.can_manage_group(target_group_id)
+public.evaluation_is_editable(target_evaluation_id)
+Estas usan security definer para evitar recursión de RLS.
+
+Permisos importantes:
+
+authenticated tiene select sobre tablas necesarias.
+orientadora puede crear/actualizar perfiles y grupos.
+orientadora puede asignar profesores.
+orientadora puede eliminar estudiantes.
+profesor puede ver/gestionar estudiantes de sus grupos.
+profesor puede crear scores si la evaluación es editable.
+Setup Para Nuevo Dev
+
+Instalar dependencias:
+npm install
+dentro de:
+
+Internship-Management-System
+Crear .env:
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+Aplicar supabase/schema.sql en Supabase SQL Editor.
+
+Crear usuarios en Supabase Auth.
+
+Editar supabase/seed.sql con UUIDs reales:
+
+admin_auth_id
+teacher_auth_id
+Ejecutar supabase/seed.sql.
+
+Levantar frontend:
+
+npm run dev
+Entrar con usuario admin o profesor.
+Comandos Útiles
+
+Build:
+
+npm run build
+Dev server:
+
+npm run dev
+Preview producción:
+
+npm run preview
+Limitación Actual
+
+La creación de usuarios Auth todavía se hace manualmente desde Supabase Dashboard. Si se quiere que el admin cree usuarios completamente desde la app, habría que agregar una Supabase Edge Function o backend con service_role, porque ese secreto no debe vivir en frontend.

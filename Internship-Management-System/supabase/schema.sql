@@ -173,6 +173,8 @@ create or replace function public.current_profile_role()
 returns public.app_role
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select role from public.profiles where id = auth.uid()
 $$;
@@ -181,6 +183,8 @@ create or replace function public.can_manage_group(target_group_id uuid)
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -203,6 +207,8 @@ create or replace function public.evaluation_is_editable(target_evaluation_id uu
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -255,10 +261,48 @@ alter table public.evaluations enable row level security;
 alter table public.evaluation_scores enable row level security;
 alter table public.notification_queue enable row level security;
 
+grant usage on schema public to authenticated;
+
+grant select on table
+  public.profiles,
+  public.specialties,
+  public.student_groups,
+  public.group_teachers,
+  public.students,
+  public.guardians,
+  public.student_guardians,
+  public.stages,
+  public.skills,
+  public.rubrics,
+  public.evaluations,
+  public.evaluation_scores
+to authenticated;
+
+grant insert, update on table public.evaluations to authenticated;
+grant insert, update on table public.evaluation_scores to authenticated;
+grant insert, update on table public.profiles to authenticated;
+grant insert, update on table public.student_groups to authenticated;
+grant insert, update on table public.group_teachers to authenticated;
+grant insert, update on table public.students to authenticated;
+grant insert, update on table public.guardians to authenticated;
+grant insert, update on table public.student_guardians to authenticated;
+grant delete on table public.students to authenticated;
+
 create policy "profiles self or orientadora"
 on public.profiles
 for select
 using (id = auth.uid() or public.current_profile_role() = 'orientadora');
+
+create policy "orientadora can register profiles"
+on public.profiles
+for insert
+with check (public.current_profile_role() = 'orientadora');
+
+create policy "orientadora can update profiles"
+on public.profiles
+for update
+using (public.current_profile_role() = 'orientadora')
+with check (public.current_profile_role() = 'orientadora');
 
 create policy "specialties readable by authenticated users"
 on public.specialties
@@ -287,23 +331,69 @@ using (
   )
 );
 
+create policy "orientadora can create groups"
+on public.student_groups
+for insert
+with check (public.current_profile_role() = 'orientadora');
+
+create policy "orientadora can update groups"
+on public.student_groups
+for update
+using (public.current_profile_role() = 'orientadora')
+with check (public.current_profile_role() = 'orientadora');
+
 create policy "teachers and orientadora can see assignments"
 on public.group_teachers
 for select
 using (teacher_profile_id = auth.uid() or public.current_profile_role() = 'orientadora');
+
+create policy "orientadora can assign teachers"
+on public.group_teachers
+for insert
+with check (public.current_profile_role() = 'orientadora');
+
+create policy "orientadora can update teacher assignments"
+on public.group_teachers
+for update
+using (public.current_profile_role() = 'orientadora')
+with check (public.current_profile_role() = 'orientadora');
 
 create policy "students visible by ownership"
 on public.students
 for select
 using (
   public.can_manage_group(group_id)
-  or id in (
-    select s.id
-    from public.students s
-    join public.profiles p on p.email = s.email
+  or email = (
+    select p.email
+    from public.profiles p
     where p.id = auth.uid()
   )
 );
+
+create policy "students insert by orientadora or group teacher"
+on public.students
+for insert
+with check (
+  public.current_profile_role() = 'orientadora'
+  or public.can_manage_group(group_id)
+);
+
+create policy "students update by orientadora or group teacher"
+on public.students
+for update
+using (
+  public.current_profile_role() = 'orientadora'
+  or public.can_manage_group(group_id)
+)
+with check (
+  public.current_profile_role() = 'orientadora'
+  or public.can_manage_group(group_id)
+);
+
+create policy "students delete by orientadora"
+on public.students
+for delete
+using (public.current_profile_role() = 'orientadora');
 
 create policy "guardians can view linked students"
 on public.student_guardians
@@ -321,6 +411,41 @@ using (
   )
 );
 
+create policy "student guardian links insert by staff"
+on public.student_guardians
+for insert
+with check (
+  public.current_profile_role() = 'orientadora'
+  or exists (
+    select 1
+    from public.students s
+    where s.id = student_guardians.student_id
+      and public.can_manage_group(s.group_id)
+  )
+);
+
+create policy "student guardian links update by staff"
+on public.student_guardians
+for update
+using (
+  public.current_profile_role() = 'orientadora'
+  or exists (
+    select 1
+    from public.students s
+    where s.id = student_guardians.student_id
+      and public.can_manage_group(s.group_id)
+  )
+)
+with check (
+  public.current_profile_role() = 'orientadora'
+  or exists (
+    select 1
+    from public.students s
+    where s.id = student_guardians.student_id
+      and public.can_manage_group(s.group_id)
+  )
+);
+
 create policy "guardians self or orientadora"
 on public.guardians
 for select
@@ -332,6 +457,23 @@ using (
     where p.id = auth.uid()
       and p.email = guardians.email
   )
+);
+
+create policy "guardians insert by staff"
+on public.guardians
+for insert
+with check (
+  public.current_profile_role() in ('orientadora', 'profesor')
+);
+
+create policy "guardians update by staff"
+on public.guardians
+for update
+using (
+  public.current_profile_role() in ('orientadora', 'profesor')
+)
+with check (
+  public.current_profile_role() in ('orientadora', 'profesor')
 );
 
 create policy "stages readable by authenticated users"
