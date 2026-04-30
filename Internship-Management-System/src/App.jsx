@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ChecklistPanel } from "@/features/gradebook/components/ChecklistPanel";
 import { EvaluationPreview } from "@/features/gradebook/components/EvaluationPreview";
 import { GradebookTable } from "@/features/gradebook/components/GradebookTable";
@@ -15,6 +16,12 @@ import { supabase } from "@/lib/supabase";
 
 export default function App() {
   const [useMock, setUseMock] = useState(false);
+  const [session, setSession] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [gradebook, setGradebook] = useState(createInitialGradebook);
   const [evaluationIds, setEvaluationIds] = useState({});
   const [dirtyRows, setDirtyRows] = useState(new Set());
@@ -30,6 +37,34 @@ export default function App() {
   const selectedRow = gradebook.rows[selectedRowIndex];
 
   useEffect(() => {
+    if (!supabase) {
+      setIsAuthReady(true);
+      return;
+    }
+
+    let ignore = false;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!ignore) {
+        setSession(data.session);
+        setIsAuthReady(true);
+      }
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthError("");
+    });
+
+    return () => {
+      ignore = true;
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthReady) return;
+
     if (useMock) {
       setGradebook(createInitialGradebook());
       setEvaluationIds({});
@@ -37,6 +72,13 @@ export default function App() {
       setIsLoading(false);
       setLoadError("");
       setSaveMessage("Usando datos mock locales.");
+      return;
+    }
+
+    if (!session) {
+      setIsLoading(false);
+      setLoadError("");
+      setEvaluationIds({});
       return;
     }
 
@@ -166,7 +208,7 @@ export default function App() {
     return () => {
       ignore = true;
     };
-  }, [useMock]);
+  }, [isAuthReady, session, useMock]);
 
   function markDirty(rowIndex) {
     setDirtyRows((previous) => new Set(previous).add(rowIndex));
@@ -274,6 +316,32 @@ export default function App() {
     });
   }
 
+  async function handleSignIn(event) {
+    event.preventDefault();
+    setIsSigningIn(true);
+    setAuthError("");
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmail,
+      password: authPassword,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+    }
+
+    setIsSigningIn(false);
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    setGradebook(createInitialGradebook());
+    setEvaluationIds({});
+    setDirtyRows(new Set());
+    setSelectedRowIndex(0);
+    setSaveMessage("Sin cambios pendientes.");
+  }
+
   async function handleSave() {
     setIsSaving(true);
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -302,6 +370,69 @@ export default function App() {
       "Etapa cerrada. A partir de aqui la UI queda en solo lectura y se puede disparar el correo automatico.",
     );
     setIsSaving(false);
+  }
+
+  if (!isAuthReady) {
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-6 px-4 py-6 lg:px-8">
+        <section className="surface p-6">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            Autenticacion
+          </p>
+          <h1 className="mt-2 text-2xl font-extrabold">Revisando sesion...</h1>
+        </section>
+      </main>
+    );
+  }
+
+  if (!session && !useMock) {
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-[560px] flex-col justify-center px-4 py-6">
+        <section className="surface p-6">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">
+            Supabase Auth
+          </p>
+          <h1 className="mt-2 text-2xl font-extrabold">Iniciar sesion</h1>
+          <form className="mt-6 space-y-4" onSubmit={handleSignIn}>
+            <div>
+              <label className="text-sm font-semibold" htmlFor="auth-email">
+                Correo
+              </label>
+              <Input
+                id="auth-email"
+                type="email"
+                value={authEmail}
+                autoComplete="email"
+                onChange={(event) => setAuthEmail(event.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="text-sm font-semibold" htmlFor="auth-password">
+                Contrasena
+              </label>
+              <Input
+                id="auth-password"
+                type="password"
+                value={authPassword}
+                autoComplete="current-password"
+                onChange={(event) => setAuthPassword(event.target.value)}
+                required
+              />
+            </div>
+            {authError ? <p className="text-sm font-semibold text-destructive">{authError}</p> : null}
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button type="submit" disabled={isSigningIn}>
+                {isSigningIn ? "Entrando..." : "Entrar"}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setUseMock(true)}>
+                Usar mocks locales
+              </Button>
+            </div>
+          </form>
+        </section>
+      </main>
+    );
   }
 
   if (isLoading) {
@@ -392,6 +523,7 @@ export default function App() {
               <Badge tone="muted">
                 {Object.keys(evaluationIds).length} evaluaciones vinculadas
               </Badge>
+              {session?.user?.email ? <Badge tone="muted">{session.user.email}</Badge> : null}
             </div>
             <p className="mt-3 text-sm text-muted-foreground">
               El payload masivo sigue disponible para conectar el `upsert` con Supabase cuando quieras.
@@ -404,6 +536,11 @@ export default function App() {
             >
               Copiar payload JSON
             </Button>
+            {!useMock ? (
+              <Button variant="ghost" size="sm" className="mt-4 ml-2" onClick={handleSignOut}>
+                Cerrar sesion
+              </Button>
+            ) : null}
           </section>
         </div>
       </div>
