@@ -14,6 +14,32 @@ import {
 } from "@/features/gradebook/utils/gradebook";
 import { supabase } from "@/lib/supabase";
 
+const emptyStudentForm = {
+  fullName: "",
+  email: "",
+  studentCode: "",
+  groupId: "",
+  guardianName: "",
+  guardianEmail: "",
+  guardianPhone: "",
+};
+
+const emptyTeacherForm = {
+  authUserId: "",
+  fullName: "",
+  email: "",
+  groupId: "",
+};
+
+const emptyGroupForm = {
+  code: "",
+  label: "",
+  schoolYear: "11",
+  specialtyId: "",
+  maxStudents: "18",
+  teacherId: "",
+};
+
 export default function App() {
   const [useMock, setUseMock] = useState(false);
   const [session, setSession] = useState(null);
@@ -22,11 +48,19 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState(null);
+  const [adminGroups, setAdminGroups] = useState([]);
+  const [specialties, setSpecialties] = useState([]);
+  const [studentForm, setStudentForm] = useState(emptyStudentForm);
+  const [teacherForm, setTeacherForm] = useState(emptyTeacherForm);
+  const [groupForm, setGroupForm] = useState(emptyGroupForm);
+  const [adminMessage, setAdminMessage] = useState("");
   const [gradebook, setGradebook] = useState(createInitialGradebook);
   const [evaluationIds, setEvaluationIds] = useState({});
   const [dirtyRows, setDirtyRows] = useState(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedRealData, setHasLoadedRealData] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [selectedRowIndex, setSelectedRowIndex] = useState(0);
   const [saveMessage, setSaveMessage] = useState("Sin cambios pendientes.");
@@ -42,14 +76,8 @@ export default function App() {
       return;
     }
 
-    let ignore = false;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!ignore) {
-        setSession(data.session);
-        setIsAuthReady(true);
-      }
-    });
+    setSession(null);
+    setIsAuthReady(true);
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
@@ -57,7 +85,6 @@ export default function App() {
     });
 
     return () => {
-      ignore = true;
       subscription.subscription.unsubscribe();
     };
   }, []);
@@ -68,6 +95,9 @@ export default function App() {
     if (useMock) {
       setGradebook(createInitialGradebook());
       setEvaluationIds({});
+      setCurrentProfile(null);
+      setAdminGroups([]);
+      setHasLoadedRealData(false);
       setSelectedRowIndex(0);
       setIsLoading(false);
       setLoadError("");
@@ -79,6 +109,9 @@ export default function App() {
       setIsLoading(false);
       setLoadError("");
       setEvaluationIds({});
+      setCurrentProfile(null);
+      setAdminGroups([]);
+      setHasLoadedRealData(false);
       return;
     }
 
@@ -91,12 +124,59 @@ export default function App() {
       }
 
       setIsLoading(true);
+      setHasLoadedRealData(false);
       setLoadError("");
 
       const { data: userResult, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       if (!userResult?.user) {
         throw new Error("Debes iniciar sesion para consultar grupos y evaluaciones.");
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, role")
+        .eq("id", userResult.user.id)
+        .maybeSingle();
+
+      if (profileError) throw profileError;
+      if (!profile) {
+        throw new Error("Tu usuario Auth no tiene perfil en public.profiles.");
+      }
+
+      if (profile.role === "orientadora") {
+        const [{ data: groups, error: groupsError }, { data: specialtiesData, error: specialtiesError }] =
+          await Promise.all([
+            supabase
+              .from("student_groups")
+              .select("id, code, label, school_year, specialty_id, specialties(name), students(id, student_code, full_name, email), group_teachers(profiles(id, full_name, email))")
+              .order("code", { ascending: true }),
+            supabase.from("specialties").select("id, name").order("name", { ascending: true }),
+          ]);
+
+        if (groupsError) throw groupsError;
+        if (specialtiesError) throw specialtiesError;
+
+        if (!ignore) {
+          setCurrentProfile(profile);
+          setAdminGroups(groups ?? []);
+          setSpecialties(specialtiesData ?? []);
+          setStudentForm((current) => ({
+            ...current,
+            groupId: current.groupId || groups?.[0]?.id || "",
+          }));
+          setTeacherForm((current) => ({
+            ...current,
+            groupId: current.groupId || groups?.[0]?.id || "",
+          }));
+          setGroupForm((current) => ({
+            ...current,
+            specialtyId: current.specialtyId || specialtiesData?.[0]?.id || "",
+          }));
+          setHasLoadedRealData(true);
+          setSaveMessage("Vista admin cargada desde Supabase.");
+        }
+        return;
       }
 
       const { data: groups, error: groupsError } = await supabase
@@ -174,6 +254,8 @@ export default function App() {
       }
 
       if (!ignore) {
+        setCurrentProfile(profile);
+        setAdminGroups(groups ?? []);
         setGradebook(
           createGradebookFromSupabase({
             group: selectedGroup,
@@ -189,9 +271,14 @@ export default function App() {
         );
         setDirtyRows(new Set());
         setSelectedRowIndex(0);
+        setStudentForm((current) => ({
+          ...current,
+          groupId: current.groupId || selectedGroup.id,
+        }));
         setSaveMessage(
           `Datos reales cargados. ${evaluations.length} evaluaciones listas; scores aun no se guardan.`,
         );
+        setHasLoadedRealData(true);
       }
     }
 
@@ -199,6 +286,7 @@ export default function App() {
       .catch((error) => {
         if (!ignore) {
           setLoadError(error.message || "No se pudieron cargar datos desde Supabase.");
+          setHasLoadedRealData(false);
         }
       })
       .finally(() => {
@@ -318,6 +406,8 @@ export default function App() {
 
   async function handleSignIn(event) {
     event.preventDefault();
+    setUseMock(false);
+    setHasLoadedRealData(false);
     setIsSigningIn(true);
     setAuthError("");
 
@@ -337,9 +427,168 @@ export default function App() {
     await supabase.auth.signOut();
     setGradebook(createInitialGradebook());
     setEvaluationIds({});
+    setCurrentProfile(null);
+    setAdminGroups([]);
+    setSpecialties([]);
+    setHasLoadedRealData(false);
     setDirtyRows(new Set());
     setSelectedRowIndex(0);
     setSaveMessage("Sin cambios pendientes.");
+  }
+
+  async function reloadCurrentSessionData() {
+    setHasLoadedRealData(false);
+    setSession((current) => (current ? { ...current } : current));
+  }
+
+  async function handleRegisterTeacher(event) {
+    event.preventDefault();
+    setAdminMessage("");
+
+    const { error: profileError } = await supabase.from("profiles").upsert({
+      id: teacherForm.authUserId,
+      full_name: teacherForm.fullName,
+      email: teacherForm.email,
+      role: "profesor",
+      is_active: true,
+    });
+
+    if (profileError) {
+      setAdminMessage(`No se pudo registrar el profesor: ${profileError.message}`);
+      return;
+    }
+
+    const { error: assignmentError } = await supabase.from("group_teachers").insert({
+      group_id: teacherForm.groupId,
+      teacher_profile_id: teacherForm.authUserId,
+      is_primary: true,
+    });
+
+    if (assignmentError) {
+      setAdminMessage(`Profesor creado, pero fallo la asignacion: ${assignmentError.message}`);
+      return;
+    }
+
+    setTeacherForm({ ...emptyTeacherForm, groupId: teacherForm.groupId });
+    setAdminMessage("Profesor registrado y asignado al grupo.");
+    await reloadCurrentSessionData();
+  }
+
+  async function handleRegisterStudent(event) {
+    event.preventDefault();
+    setAdminMessage("");
+
+    const selectedGroup = adminGroups.find((group) => group.id === studentForm.groupId);
+    const specialtyId = selectedGroup?.specialty_id || gradebook.group.specialtyId;
+
+    if (!specialtyId) {
+      setAdminMessage("No se pudo determinar la especialidad del grupo.");
+      return;
+    }
+
+    const { data: student, error: studentError } = await supabase
+      .from("students")
+      .insert({
+        student_code: studentForm.studentCode,
+        full_name: studentForm.fullName,
+        email: studentForm.email,
+        specialty_id: specialtyId,
+        group_id: studentForm.groupId || gradebook.group.id,
+      })
+      .select("id")
+      .single();
+
+    if (studentError) {
+      setAdminMessage(`No se pudo registrar el estudiante: ${studentError.message}`);
+      return;
+    }
+
+    const { data: guardian, error: guardianError } = await supabase
+      .from("guardians")
+      .upsert(
+        {
+          full_name: studentForm.guardianName,
+          email: studentForm.guardianEmail,
+          phone: studentForm.guardianPhone || null,
+        },
+        { onConflict: "email" },
+      )
+      .select("id")
+      .single();
+
+    if (guardianError) {
+      setAdminMessage(`Estudiante creado, pero fallo el encargado: ${guardianError.message}`);
+      return;
+    }
+
+    const { error: linkError } = await supabase.from("student_guardians").insert({
+      student_id: student.id,
+      guardian_id: guardian.id,
+      relationship: "Encargado",
+      is_primary: true,
+    });
+
+    if (linkError) {
+      setAdminMessage(`Estudiante y encargado creados, pero fallo el enlace: ${linkError.message}`);
+      return;
+    }
+
+    setStudentForm({ ...emptyStudentForm, groupId: studentForm.groupId });
+    setAdminMessage("Estudiante registrado correctamente.");
+    await reloadCurrentSessionData();
+  }
+
+  async function handleCreateGroup(event) {
+    event.preventDefault();
+    setAdminMessage("");
+
+    const { data: group, error: groupError } = await supabase
+      .from("student_groups")
+      .insert({
+        code: groupForm.code,
+        label: groupForm.label,
+        school_year: Number(groupForm.schoolYear),
+        specialty_id: groupForm.specialtyId,
+        max_students: Number(groupForm.maxStudents),
+      })
+      .select("id")
+      .single();
+
+    if (groupError) {
+      setAdminMessage(`No se pudo crear el grupo: ${groupError.message}`);
+      return;
+    }
+
+    if (groupForm.teacherId) {
+      const { error: assignmentError } = await supabase.from("group_teachers").insert({
+        group_id: group.id,
+        teacher_profile_id: groupForm.teacherId,
+        is_primary: true,
+      });
+
+      if (assignmentError) {
+        setAdminMessage(`Grupo creado, pero fallo la asignacion: ${assignmentError.message}`);
+        return;
+      }
+    }
+
+    setGroupForm({ ...emptyGroupForm, specialtyId: groupForm.specialtyId });
+    setAdminMessage("Grupo creado correctamente.");
+    await reloadCurrentSessionData();
+  }
+
+  async function handleDeleteStudent(studentId) {
+    setAdminMessage("");
+
+    const { error } = await supabase.from("students").delete().eq("id", studentId);
+
+    if (error) {
+      setAdminMessage(`No se pudo eliminar el estudiante: ${error.message}`);
+      return;
+    }
+
+    setAdminMessage("Estudiante eliminado.");
+    await reloadCurrentSessionData();
   }
 
   async function handleSave() {
@@ -435,7 +684,7 @@ export default function App() {
     );
   }
 
-  if (isLoading) {
+  if (!loadError && session && !useMock && (isLoading || !hasLoadedRealData)) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-6 px-4 py-6 lg:px-8">
         <section className="surface p-6">
@@ -462,6 +711,28 @@ export default function App() {
           </Button>
         </section>
       </main>
+    );
+  }
+
+  if (currentProfile?.role === "orientadora" && !useMock) {
+    return (
+      <AdminView
+        groups={adminGroups}
+        profile={currentProfile}
+        studentForm={studentForm}
+        teacherForm={teacherForm}
+        groupForm={groupForm}
+        specialties={specialties}
+        message={adminMessage}
+        onStudentFormChange={setStudentForm}
+        onTeacherFormChange={setTeacherForm}
+        onGroupFormChange={setGroupForm}
+        onRegisterStudent={handleRegisterStudent}
+        onRegisterTeacher={handleRegisterTeacher}
+        onCreateGroup={handleCreateGroup}
+        onDeleteStudent={handleDeleteStudent}
+        onSignOut={handleSignOut}
+      />
     );
   }
 
@@ -542,8 +813,239 @@ export default function App() {
               </Button>
             ) : null}
           </section>
+
+          {!useMock ? (
+            <RegisterStudentPanel
+              groups={adminGroups}
+              studentForm={{
+                ...studentForm,
+                groupId: studentForm.groupId || gradebook.group.id,
+              }}
+              message={adminMessage}
+              onStudentFormChange={setStudentForm}
+              onRegisterStudent={handleRegisterStudent}
+            />
+          ) : null}
         </div>
       </div>
     </main>
+  );
+}
+
+function RegisterStudentPanel({
+  groups,
+  studentForm,
+  message,
+  onStudentFormChange,
+  onRegisterStudent,
+}) {
+  return (
+    <section className="surface p-5">
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+        Registro de alumno
+      </p>
+      <h2 className="mt-1 text-lg font-bold">Agregar estudiante al grupo</h2>
+      <form className="mt-4 grid gap-3" onSubmit={onRegisterStudent}>
+        <InputField label="Nombre" value={studentForm.fullName} onChange={(fullName) => onStudentFormChange((current) => ({ ...current, fullName }))} />
+        <InputField label="Correo" type="email" value={studentForm.email} onChange={(email) => onStudentFormChange((current) => ({ ...current, email }))} />
+        <InputField label="Codigo" value={studentForm.studentCode} onChange={(studentCode) => onStudentFormChange((current) => ({ ...current, studentCode }))} />
+        <SelectField
+          label="Grupo"
+          value={studentForm.groupId}
+          options={groups.map((group) => ({ value: group.id, label: group.label }))}
+          onChange={(groupId) => onStudentFormChange((current) => ({ ...current, groupId }))}
+        />
+        <InputField label="Encargado" value={studentForm.guardianName} onChange={(guardianName) => onStudentFormChange((current) => ({ ...current, guardianName }))} />
+        <InputField label="Correo encargado" type="email" value={studentForm.guardianEmail} onChange={(guardianEmail) => onStudentFormChange((current) => ({ ...current, guardianEmail }))} />
+        <InputField label="Telefono encargado" value={studentForm.guardianPhone} onChange={(guardianPhone) => onStudentFormChange((current) => ({ ...current, guardianPhone }))} required={false} />
+        {message ? <p className="text-sm font-semibold text-muted-foreground">{message}</p> : null}
+        <Button type="submit">Registrar alumno</Button>
+      </form>
+    </section>
+  );
+}
+
+function AdminView({
+  groups,
+  profile,
+  studentForm,
+  teacherForm,
+  groupForm,
+  specialties,
+  message,
+  onStudentFormChange,
+  onTeacherFormChange,
+  onGroupFormChange,
+  onRegisterStudent,
+  onRegisterTeacher,
+  onCreateGroup,
+  onDeleteStudent,
+  onSignOut,
+}) {
+  const teacherOptions = groups
+    .flatMap((group) => group.group_teachers ?? [])
+    .map((assignment) => assignment.profiles)
+    .filter(Boolean);
+  const uniqueTeacherOptions = Array.from(
+    new Map(teacherOptions.map((teacher) => [teacher.id, teacher])).values(),
+  );
+
+  return (
+    <main className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-6 px-4 py-6 lg:px-8">
+      <section className="surface p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary">
+              Vista admin
+            </p>
+            <h1 className="mt-2 text-3xl font-extrabold">Grupos y registros</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{profile.email}</p>
+          </div>
+          <Button variant="outline" onClick={onSignOut}>Cerrar sesion</Button>
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
+        <section className="surface overflow-hidden">
+          <div className="border-b px-6 py-4">
+            <h2 className="text-lg font-bold">Todos los grupos</h2>
+          </div>
+          <div className="divide-y">
+            {groups.map((group) => (
+              <div key={group.id} className="p-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-bold">{group.label}</h3>
+                  <Badge tone="muted">{group.specialties?.name}</Badge>
+                  <Badge>{group.students?.length ?? 0} estudiantes</Badge>
+                </div>
+                <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {(group.students ?? []).map((student) => (
+                    <div key={student.id} className="rounded-lg border bg-white p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{student.full_name}</p>
+                          <p className="text-xs text-muted-foreground">{student.email}</p>
+                          <p className="text-xs text-muted-foreground">{student.student_code}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => onDeleteStudent(student.id)}
+                        >
+                          Eliminar
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="space-y-6">
+          <section className="surface p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Nuevo grupo
+            </p>
+            <h2 className="mt-1 text-lg font-bold">Crear grupo</h2>
+            <form className="mt-4 grid gap-3" onSubmit={onCreateGroup}>
+              <InputField label="Codigo" value={groupForm.code} onChange={(code) => onGroupFormChange((current) => ({ ...current, code }))} />
+              <InputField label="Nombre" value={groupForm.label} onChange={(label) => onGroupFormChange((current) => ({ ...current, label }))} />
+              <SelectField
+                label="Nivel"
+                value={groupForm.schoolYear}
+                options={[
+                  { value: "11", label: "11" },
+                  { value: "12", label: "12" },
+                ]}
+                onChange={(schoolYear) => onGroupFormChange((current) => ({ ...current, schoolYear }))}
+              />
+              <SelectField
+                label="Especialidad"
+                value={groupForm.specialtyId}
+                options={specialties.map((specialty) => ({ value: specialty.id, label: specialty.name }))}
+                onChange={(specialtyId) => onGroupFormChange((current) => ({ ...current, specialtyId }))}
+              />
+              <InputField label="Maximo estudiantes" type="number" value={groupForm.maxStudents} onChange={(maxStudents) => onGroupFormChange((current) => ({ ...current, maxStudents }))} />
+              <SelectField
+                label="Profesor"
+                value={groupForm.teacherId}
+                required={false}
+                options={uniqueTeacherOptions.map((teacher) => ({ value: teacher.id, label: teacher.full_name }))}
+                onChange={(teacherId) => onGroupFormChange((current) => ({ ...current, teacherId }))}
+              />
+              <Button type="submit">Crear grupo</Button>
+            </form>
+          </section>
+
+          <section className="surface p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Registro de profesor
+            </p>
+            <h2 className="mt-1 text-lg font-bold">Asignar profesor a grupo</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Crea primero el usuario en Supabase Auth y pega aqui su UUID.
+            </p>
+            <form className="mt-4 grid gap-3" onSubmit={onRegisterTeacher}>
+              <InputField label="UUID Auth" value={teacherForm.authUserId} onChange={(authUserId) => onTeacherFormChange((current) => ({ ...current, authUserId }))} />
+              <InputField label="Nombre" value={teacherForm.fullName} onChange={(fullName) => onTeacherFormChange((current) => ({ ...current, fullName }))} />
+              <InputField label="Correo" type="email" value={teacherForm.email} onChange={(email) => onTeacherFormChange((current) => ({ ...current, email }))} />
+              <SelectField
+                label="Grupo"
+                value={teacherForm.groupId}
+                options={groups.map((group) => ({ value: group.id, label: group.label }))}
+                onChange={(groupId) => onTeacherFormChange((current) => ({ ...current, groupId }))}
+              />
+              <Button type="submit">Registrar profesor</Button>
+            </form>
+          </section>
+
+          <RegisterStudentPanel
+            groups={groups}
+            studentForm={studentForm}
+            message={message}
+            onStudentFormChange={onStudentFormChange}
+            onRegisterStudent={onRegisterStudent}
+          />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function InputField({ label, value, onChange, type = "text", required = true }) {
+  return (
+    <label className="grid gap-1 text-sm font-semibold">
+      {label}
+      <Input
+        type={type}
+        value={value}
+        required={required}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function SelectField({ label, value, options, onChange, required = true }) {
+  return (
+    <label className="grid gap-1 text-sm font-semibold">
+      {label}
+      <select
+        value={value}
+        required={required}
+        className="flex h-9 w-full rounded-lg border bg-white px-3 py-1 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="" disabled={required}>Seleccione una opcion</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
