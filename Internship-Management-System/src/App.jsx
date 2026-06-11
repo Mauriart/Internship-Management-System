@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChecklistPanel } from "@/features/gradebook/components/ChecklistPanel";
 import { EvaluationPreview } from "@/features/gradebook/components/EvaluationPreview";
+import { GradebookDashboard, getRowRisk } from "@/features/gradebook/components/GradebookDashboard";
 import { GradebookTable } from "@/features/gradebook/components/GradebookTable";
 import { StageHeader } from "@/features/gradebook/components/StageHeader";
 import {
@@ -64,11 +65,35 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [selectedRowIndex, setSelectedRowIndex] = useState(0);
   const [saveMessage, setSaveMessage] = useState("Sin cambios pendientes.");
+  const [studentSearch, setStudentSearch] = useState("");
+  const [riskFilter, setRiskFilter] = useState("all");
 
   const allChecklistDone = gradebook.checklist.every((item) => item.done);
 
   const savePayload = useMemo(() => buildSavePayload(gradebook), [gradebook]);
   const selectedRow = gradebook.rows[selectedRowIndex];
+  const filteredRows = useMemo(() => {
+    const normalizedSearch = studentSearch.trim().toLowerCase();
+
+    return gradebook.rows
+      .map((row, rowIndex) => ({ ...row, rowIndex }))
+      .filter((row) => {
+        const matchesSearch =
+          !normalizedSearch ||
+          row.student.fullName.toLowerCase().includes(normalizedSearch) ||
+          row.student.studentEmail.toLowerCase().includes(normalizedSearch);
+        const matchesRisk =
+          riskFilter === "all" || getRowRisk(row, gradebook.skills) === riskFilter;
+
+        return matchesSearch && matchesRisk;
+      });
+  }, [gradebook.rows, gradebook.skills, riskFilter, studentSearch]);
+
+  useEffect(() => {
+    if (!filteredRows.length) return;
+    const selectedIsVisible = filteredRows.some((row) => row.rowIndex === selectedRowIndex);
+    if (!selectedIsVisible) setSelectedRowIndex(filteredRows[0].rowIndex);
+  }, [filteredRows, selectedRowIndex]);
 
   useEffect(() => {
     if (!supabase) {
@@ -850,17 +875,44 @@ export default function App() {
         isSaving={isSaving}
       />
 
+      <GradebookDashboard
+        rows={gradebook.rows}
+        skills={gradebook.skills}
+        filteredCount={filteredRows.length}
+        searchTerm={studentSearch}
+        riskFilter={riskFilter}
+        onSearchTermChange={setStudentSearch}
+        onRiskFilterChange={setRiskFilter}
+        dirtyCount={dirtyRows.size}
+      />
+
       <div className="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
-        <GradebookTable
-          skills={gradebook.skills}
-          rows={gradebook.rows}
-          disabled={gradebook.stage.isLocked}
-          selectedRowIndex={selectedRowIndex}
-          onSelectRow={setSelectedRowIndex}
-          onScoreChange={updateScore}
-          onObservationChange={updateObservation}
-          onObservationBlur={saveObservation}
-        />
+        {filteredRows.length ? (
+          <GradebookTable
+            skills={gradebook.skills}
+            rows={filteredRows}
+            disabled={gradebook.stage.isLocked}
+            selectedRowIndex={selectedRowIndex}
+            onSelectRow={setSelectedRowIndex}
+            onScoreChange={updateScore}
+            onObservationChange={updateObservation}
+            onObservationBlur={saveObservation}
+          />
+        ) : (
+          <section className="surface flex min-h-[360px] items-center justify-center p-8 text-center">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Sin resultados
+              </p>
+              <h2 className="mt-2 text-xl font-extrabold">
+                No hay estudiantes con esos filtros.
+              </h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Ajusta la busqueda o cambia el nivel de seguimiento seleccionado.
+              </p>
+            </div>
+          </section>
+        )}
         <div className="space-y-6">
           <ChecklistPanel
             items={gradebook.checklist}
@@ -890,31 +942,51 @@ export default function App() {
 
           <section className="surface p-5">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Estado de integracion
+              Operacion
             </p>
-            <div className="mt-3 space-y-3">
-              <Badge>{saveMessage}</Badge>
-              <Badge tone="muted">
-                {Object.keys(evaluationIds).length} evaluaciones vinculadas
-              </Badge>
+            <h2 className="mt-1 text-lg font-bold">Estado del registro</h2>
+            <div className="mt-4 grid gap-3">
+              <div className="rounded-2xl border bg-white p-3">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                  Ultima accion
+                </p>
+                <p className="mt-1 text-sm font-semibold">{saveMessage}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-muted/60 p-3">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                    Evaluaciones
+                  </p>
+                  <p className="mt-1 text-2xl font-extrabold">
+                    {Object.keys(evaluationIds).length}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-muted/60 p-3">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                    Pendientes
+                  </p>
+                  <p className="mt-1 text-2xl font-extrabold">{dirtyRows.size}</p>
+                </div>
+              </div>
               {session?.user?.email ? <Badge tone="muted">{session.user.email}</Badge> : null}
             </div>
             <p className="mt-3 text-sm text-muted-foreground">
               Los cambios de puntaje se guardan al seleccionar y las observaciones se guardan al salir del campo o usar el boton Guardar.
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-4"
-              onClick={() => navigator.clipboard.writeText(JSON.stringify(savePayload, null, 2))}
-            >
-              Copiar respaldo JSON
-            </Button>
-            {!useMock ? (
-              <Button variant="ghost" size="sm" className="mt-4 ml-2" onClick={handleSignOut}>
-                Cerrar sesion
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigator.clipboard.writeText(JSON.stringify(savePayload, null, 2))}
+              >
+                Copiar respaldo JSON
               </Button>
-            ) : null}
+              {!useMock ? (
+                <Button variant="ghost" size="sm" onClick={handleSignOut}>
+                  Cerrar sesion
+                </Button>
+              ) : null}
+            </div>
           </section>
 
           {!useMock ? (
