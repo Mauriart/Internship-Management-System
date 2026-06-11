@@ -195,7 +195,7 @@ export default function App() {
         await Promise.all([
           supabase
             .from("students")
-            .select("id, student_code, full_name, email, group_id")
+            .select("id, student_code, full_name, email, group_id, student_guardians(is_primary, guardians(email))")
             .eq("group_id", selectedGroup.id)
             .order("full_name", { ascending: true }),
           supabase
@@ -224,7 +224,7 @@ export default function App() {
       if (studentIds.length > 0) {
         const { data: existingEvaluations, error: evaluationsError } = await supabase
           .from("evaluations")
-          .select("id, student_id, stage_id")
+          .select("id, student_id, stage_id, observations, status, evaluation_scores(skill_id, score)")
           .eq("stage_id", stage.id)
           .in("student_id", studentIds);
 
@@ -245,7 +245,7 @@ export default function App() {
           const { data: insertedEvaluations, error: insertError } = await supabase
             .from("evaluations")
             .insert(missingEvaluations)
-            .select("id, student_id, stage_id");
+            .select("id, student_id, stage_id, observations, status, evaluation_scores(skill_id, score)");
 
           if (insertError) throw insertError;
 
@@ -262,6 +262,8 @@ export default function App() {
             stage,
             skills: skills ?? [],
             students: students ?? [],
+            evaluations,
+            teacherName: profile.full_name,
           }),
         );
         setEvaluationIds(
@@ -276,7 +278,7 @@ export default function App() {
           groupId: current.groupId || selectedGroup.id,
         }));
         setSaveMessage(
-          `Datos reales cargados. ${evaluations.length} evaluaciones listas; scores aun no se guardan.`,
+          `Datos reales cargados. ${evaluations.length} evaluaciones vinculadas.`,
         );
         setHasLoadedRealData(true);
       }
@@ -344,8 +346,6 @@ export default function App() {
 
       return { ...current, rows: nextRows };
     });
-    markDirty(rowIndex);
-
     if (useMock) {
       setSaveMessage("Puntaje actualizado solo en mocks locales.");
       return;
@@ -353,7 +353,6 @@ export default function App() {
 
     if (!supabase || !evaluationId) {
       restorePreviousScore();
-      clearDirty(rowIndex);
       setSaveMessage("No se pudo guardar el puntaje: falta la evaluacion vinculada.");
       return;
     }
@@ -371,12 +370,10 @@ export default function App() {
 
     if (error) {
       restorePreviousScore();
-      clearDirty(rowIndex);
       setSaveMessage(`No se pudo guardar el puntaje: ${error.message}`);
       return;
     }
 
-    clearDirty(rowIndex);
     setSaveMessage("Puntaje guardado en Supabase.");
   }
 
@@ -391,6 +388,37 @@ export default function App() {
       return { ...current, rows: nextRows };
     });
     markDirty(rowIndex);
+  }
+
+  async function saveObservation(rowIndex) {
+    const row = gradebook.rows[rowIndex];
+    const evaluationId = evaluationIds[row?.student?.id];
+
+    if (!row) return;
+
+    if (useMock) {
+      clearDirty(rowIndex);
+      setSaveMessage("Observacion guardada solo en mocks locales.");
+      return;
+    }
+
+    if (!supabase || !evaluationId) {
+      setSaveMessage("No se pudo guardar la observacion: falta la evaluacion vinculada.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("evaluations")
+      .update({ observations: row.observations })
+      .eq("id", evaluationId);
+
+    if (error) {
+      setSaveMessage(`No se pudo guardar la observacion: ${error.message}`);
+      return;
+    }
+
+    clearDirty(rowIndex);
+    setSaveMessage("Observacion guardada en Supabase.");
   }
 
   function toggleChecklist(index) {
@@ -593,20 +621,93 @@ export default function App() {
 
   async function handleSave() {
     setIsSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    console.info("Bulk payload ready for Supabase upsert", savePayload);
+    const rowsToSave = Array.from(dirtyRows);
+
+    if (!rowsToSave.length) {
+      setSaveMessage("No hay observaciones pendientes por guardar.");
+      setIsSaving(false);
+      return true;
+    }
+
+    if (useMock) {
+      setDirtyRows(new Set());
+      setSaveMessage(`Se guardaron ${rowsToSave.length} observaciones en mocks locales.`);
+      setIsSaving(false);
+      return true;
+    }
+
+    if (!supabase) {
+      setSaveMessage("No se pudo guardar: Supabase no esta configurado.");
+      setIsSaving(false);
+      return false;
+    }
+
+    const updates = rowsToSave
+      .map((rowIndex) => {
+        const row = gradebook.rows[rowIndex];
+        const evaluationId = evaluationIds[row?.student?.id];
+        if (!row || !evaluationId) return null;
+        return supabase
+          .from("evaluations")
+          .update({ observations: row.observations })
+          .eq("id", evaluationId);
+      })
+      .filter(Boolean);
+
+    if (!updates.length) {
+      setSaveMessage("No se encontraron evaluaciones vinculadas para guardar observaciones.");
+      setIsSaving(false);
+      return false;
+    }
+
+    const results = await Promise.all(updates);
+    const firstError = results.find((result) => result.error)?.error;
+
+    if (firstError) {
+      setSaveMessage(`No se pudieron guardar todas las observaciones: ${firstError.message}`);
+      setIsSaving(false);
+      return false;
+    }
+
     setDirtyRows(new Set());
-    setSaveMessage(
-      `Se preparo un lote de ${savePayload.length} evaluaciones para upsert en Supabase.`,
-    );
+    setSaveMessage(`Se guardaron ${updates.length} observaciones en Supabase.`);
     setIsSaving(false);
+    return true;
   }
 
   async function handleFinalize() {
     if (!allChecklistDone) return;
 
     setIsSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    if (!useMock && supabase) {
+      const observationsSaved = await handleSave();
+      if (!observationsSaved) {
+        setIsSaving(false);
+        return;
+      }
+
+      const evaluationIdList = Object.values(evaluationIds);
+      if (evaluationIdList.length > 0) {
+        const { error } = await supabase
+          .from("evaluations")
+          .update({
+            checklist_completed: true,
+            status: "locked",
+            locked_at: new Date().toISOString(),
+          })
+          .in("id", evaluationIdList);
+
+        if (error) {
+          setSaveMessage(`No se pudo cerrar la etapa: ${error.message}`);
+          setIsSaving(false);
+          return;
+        }
+      }
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+
     setGradebook((current) => ({
       ...current,
       stage: {
@@ -616,7 +717,7 @@ export default function App() {
     }));
     setDirtyRows(new Set());
     setSaveMessage(
-      "Etapa cerrada. A partir de aqui la UI queda en solo lectura y se puede disparar el correo automatico.",
+      "Etapa cerrada. La matriz queda en solo lectura y los informes pueden enviarse al encargado.",
     );
     setIsSaving(false);
   }
@@ -758,6 +859,7 @@ export default function App() {
           onSelectRow={setSelectedRowIndex}
           onScoreChange={updateScore}
           onObservationChange={updateObservation}
+          onObservationBlur={saveObservation}
         />
         <div className="space-y-6">
           <ChecklistPanel
@@ -798,7 +900,7 @@ export default function App() {
               {session?.user?.email ? <Badge tone="muted">{session.user.email}</Badge> : null}
             </div>
             <p className="mt-3 text-sm text-muted-foreground">
-              El payload masivo sigue disponible para conectar el `upsert` con Supabase cuando quieras.
+              Los cambios de puntaje se guardan al seleccionar y las observaciones se guardan al salir del campo o usar el boton Guardar.
             </p>
             <Button
               variant="outline"
@@ -806,7 +908,7 @@ export default function App() {
               className="mt-4"
               onClick={() => navigator.clipboard.writeText(JSON.stringify(savePayload, null, 2))}
             >
-              Copiar payload JSON
+              Copiar respaldo JSON
             </Button>
             {!useMock ? (
               <Button variant="ghost" size="sm" className="mt-4 ml-2" onClick={handleSignOut}>

@@ -552,7 +552,6 @@ for update
 using (public.can_manage_group(group_id))
 with check (
   public.can_manage_group(group_id)
-  and status <> 'locked'
 );
 
 create policy "score read mirrors evaluation read"

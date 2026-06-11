@@ -14,6 +14,7 @@ export function GradebookTable({
   rows,
   onScoreChange,
   onObservationChange,
+  onObservationBlur,
   disabled,
   selectedRowIndex,
   onSelectRow,
@@ -119,6 +120,7 @@ export function GradebookTable({
                     onSelectRow(rowIndex);
                   }}
                   onChange={(event) => onObservationChange(rowIndex, event.target.value)}
+                  onBlur={() => onObservationBlur?.(rowIndex)}
                 />
               </TableCell>
             </TableRow>
