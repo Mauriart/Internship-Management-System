@@ -867,7 +867,7 @@ function RegisterStudentPanel({
 
 function AdminView({
   groups,
-profi   le,
+profile,
   studentForm,
   teacherForm,
   groupForm,
