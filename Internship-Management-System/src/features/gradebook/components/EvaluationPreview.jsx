@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AiFeedbackPanel } from "@/features/ai-feedback/components/AiFeedbackPanel";
 
 function scoreLabel(score) {
   if (score === 3) return "Esperado";
@@ -72,7 +73,7 @@ function buildPrintableHtml({ group, stage, row, skills }) {
   </html>`;
 }
 
-export function EvaluationPreview({ group, stage, row, skills, disabled }) {
+export function EvaluationPreview({ group, stage, row, skills, disabled, useMock }) {
   const total = skills.reduce((sum, skill) => sum + row.scores[skill.id], 0);
   const average = (total / skills.length).toFixed(2);
 
@@ -165,6 +166,16 @@ export function EvaluationPreview({ group, stage, row, skills, disabled }) {
           <p className="mt-2 whitespace-pre-wrap text-sm">
             {row.observations || "Sin observaciones registradas."}
           </p>
+        </div>
+
+        <div className="mt-4">
+          <AiFeedbackPanel
+            row={row}
+            skills={skills}
+            stage={stage}
+            disabled={disabled}
+            useMock={useMock}
+          />
         </div>
       </div>
 

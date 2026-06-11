@@ -773,6 +773,7 @@ export default function App() {
               row={selectedRow}
               skills={gradebook.skills}
               disabled={gradebook.stage.isLocked}
+              useMock={useMock}
             />
           ) : (
             <section className="surface p-5">
