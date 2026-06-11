@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Mail } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AiFeedbackPanel } from "@/features/ai-feedback/components/AiFeedbackPanel";
@@ -26,6 +28,10 @@ function escapeHtml(value) {
 
 function listItems(items) {
   return items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+}
+
+function textList(items) {
+  return items.map((item) => `- ${item}`).join("\n");
 }
 
 function buildPrintableHtml({ group, stage, row, skills }) {
@@ -118,7 +124,49 @@ function buildPrintableHtml({ group, stage, row, skills }) {
   </html>`;
 }
 
+function buildGuardianEmail({ group, stage, row, skills }) {
+  const feedback = generateLocalFeedback({ row, skills });
+  const scoreLines = skills
+    .map((skill) => `${skill.label}: ${row.scores[skill.id]} (${scoreLabel(row.scores[skill.id])})`)
+    .join("\n");
+  const total = skills.reduce((sum, skill) => sum + row.scores[skill.id], 0);
+  const average = (total / skills.length).toFixed(2);
+
+  return {
+    subject: `Informe de seguimiento - ${row.student.fullName}`,
+    body: `Estimado(a) encargado(a):
+
+Se comparte el informe de seguimiento correspondiente a la pasantia del estudiante ${row.student.fullName}.
+
+Grupo: ${group.name}
+Especialidad: ${group.specialty}
+Etapa: ${stage.name}
+
+Resumen de puntajes:
+${scoreLines}
+
+Puntaje total: ${total}
+Promedio: ${average}
+Nivel de seguimiento: ${riskLabel(feedback.riskLevel)}
+
+Observaciones:
+${row.observations || "Sin observaciones registradas."}
+
+Fortalezas:
+${textList(feedback.strengths)}
+
+Areas de mejora:
+${textList(feedback.improvementAreas)}
+
+Recomendaciones para el estudiante:
+${textList(feedback.studentRecommendations)}
+
+Saludos cordiales.`,
+  };
+}
+
 export function EvaluationPreview({ group, stage, row, skills, disabled, useMock }) {
+  const [emailMessage, setEmailMessage] = useState("");
   const total = skills.reduce((sum, skill) => sum + row.scores[skill.id], 0);
   const average = (total / skills.length).toFixed(2);
 
@@ -131,6 +179,23 @@ export function EvaluationPreview({ group, stage, row, skills, disabled, useMock
     previewWindow.document.close();
     previewWindow.focus();
     previewWindow.print();
+  }
+
+  function handleEmailGuardian() {
+    const guardianEmail = row.student.guardianEmail;
+
+    if (!guardianEmail || guardianEmail === "Pendiente de cargar") {
+      setEmailMessage("No hay correo de encargado disponible para este estudiante.");
+      return;
+    }
+
+    const { subject, body } = buildGuardianEmail({ group, stage, row, skills });
+    const mailtoUrl = `mailto:${encodeURIComponent(guardianEmail)}?subject=${encodeURIComponent(
+      subject,
+    )}&body=${encodeURIComponent(body)}`;
+
+    window.location.href = mailtoUrl;
+    setEmailMessage(`Correo preparado para ${guardianEmail}.`);
   }
 
   return (
@@ -227,6 +292,15 @@ export function EvaluationPreview({ group, stage, row, skills, disabled, useMock
       <Button className="mt-4 w-full" onClick={handlePrint}>
         Abrir vista para PDF
       </Button>
+      <Button className="mt-3 w-full gap-2" variant="outline" onClick={handleEmailGuardian}>
+        <Mail className="h-4 w-4" aria-hidden="true" />
+        Enviar informe al encargado
+      </Button>
+      {emailMessage ? (
+        <p className="mt-2 rounded-xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">
+          {emailMessage}
+        </p>
+      ) : null}
       <p className="mt-2 text-xs text-muted-foreground">
         Se abre la tarjeta en una ventana lista para imprimir o guardar como PDF.
       </p>
