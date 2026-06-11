@@ -112,10 +112,6 @@ function buildPrintableHtml({ group, stage, row, skills }) {
             <p class="feedback-title">Recomendaciones para estudiante</p>
             <ul>${listItems(feedback.studentRecommendations)}</ul>
           </div>
-          <div class="feedback-box">
-            <p class="feedback-title">Recomendaciones para docente</p>
-            <ul>${listItems(feedback.teacherRecommendations)}</ul>
-          </div>
         </div>
       </div>
     </body>
