@@ -72,9 +72,9 @@ export function generateLocalFeedback({ row, skills }) {
         : "Reconocer las fortalezas observadas y asignar retos proporcionales al avance.",
       "Registrar evidencia breve de las acciones de apoyo aplicadas para mantener trazabilidad.",
     ],
-    summary: `Retroalimentacion generada con motor explicable ${AI_FEEDBACK_MODEL_VERSION}. Promedio general ${average.toFixed(
+    summary: `Promedio general ${average.toFixed(
       2,
-    )}; riesgo ${riskLevel}; ${lowScores.length} habilidad(es) requieren apoyo.`,
+    )}. Se identificaron ${lowScores.length} habilidad(es) que requieren apoyo prioritario.`,
     modelVersion: AI_FEEDBACK_MODEL_VERSION,
     generatedAt: new Date().toISOString(),
   });

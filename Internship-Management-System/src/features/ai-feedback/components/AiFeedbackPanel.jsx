@@ -28,7 +28,7 @@ export function AiFeedbackPanel({ row, skills, stage, disabled, useMock }) {
           </div>
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-cyan-900/70">
-              AI Feedback Assistant
+              Asistente IA
             </p>
             <h4 className="mt-1 text-base font-extrabold text-slate-950">
               Retroalimentacion inteligente
@@ -46,9 +46,9 @@ export function AiFeedbackPanel({ row, skills, stage, disabled, useMock }) {
           <FeedbackList title="Recomendaciones para estudiante" items={feedback.studentRecommendations} />
           <FeedbackList title="Recomendaciones para docente" items={feedback.teacherRecommendations} />
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <Badge tone="muted">{feedback.modelVersion}</Badge>
+            <Badge tone="muted">Analisis explicable</Badge>
             {feedback.generatedAt ? (
-              <span>Generado: {new Date(feedback.generatedAt).toLocaleString("es-CR")}</span>
+              <span>Actualizado: {new Date(feedback.generatedAt).toLocaleString("es-CR")}</span>
             ) : null}
             {isFallback ? <span>Modo demostracion local</span> : null}
           </div>

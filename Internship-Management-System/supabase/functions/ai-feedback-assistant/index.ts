@@ -63,9 +63,9 @@ function buildFeedback(scores: SkillScore[]) {
     "Registrar evidencia breve de las acciones de apoyo aplicadas para mantener trazabilidad.",
   ];
 
-  const summary = `Retroalimentacion generada con motor explicable rules-v1. Promedio general ${average.toFixed(
+  const summary = `Promedio general ${average.toFixed(
     2,
-  )}; riesgo ${riskLevel}; ${lowScores.length} habilidad(es) requieren apoyo.`;
+  )}. Se identificaron ${lowScores.length} habilidad(es) que requieren apoyo prioritario.`;
 
   return {
     risk_level: riskLevel,
