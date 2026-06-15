@@ -132,6 +132,24 @@ create table if not exists public.evaluation_scores (
   primary key (evaluation_id, skill_id)
 );
 
+create table if not exists public.ai_feedback (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.students (id) on delete cascade,
+  stage_id uuid not null references public.stages (id) on delete cascade,
+  evaluation_id uuid references public.evaluations (id) on delete set null,
+  risk_level text not null check (risk_level in ('low', 'medium', 'high')),
+  strengths text[] not null default '{}',
+  improvement_areas text[] not null default '{}',
+  student_recommendations text[] not null default '{}',
+  teacher_recommendations text[] not null default '{}',
+  summary text not null default '',
+  model_version text not null default 'rules-v1',
+  generated_at timestamptz not null default timezone('utc', now()),
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint unique_ai_feedback_student_stage unique (student_id, stage_id)
+);
+
 create table if not exists public.notification_queue (
   id uuid primary key default gen_random_uuid(),
   evaluation_id uuid not null references public.evaluations (id) on delete cascade,
@@ -167,6 +185,11 @@ for each row execute function public.set_updated_at();
 drop trigger if exists set_evaluation_scores_updated_at on public.evaluation_scores;
 create trigger set_evaluation_scores_updated_at
 before update on public.evaluation_scores
+for each row execute function public.set_updated_at();
+
+drop trigger if exists set_ai_feedback_updated_at on public.ai_feedback;
+create trigger set_ai_feedback_updated_at
+before update on public.ai_feedback
 for each row execute function public.set_updated_at();
 
 create or replace function public.current_profile_role()
@@ -259,6 +282,7 @@ alter table public.skills enable row level security;
 alter table public.rubrics enable row level security;
 alter table public.evaluations enable row level security;
 alter table public.evaluation_scores enable row level security;
+alter table public.ai_feedback enable row level security;
 alter table public.notification_queue enable row level security;
 
 grant usage on schema public to authenticated;
@@ -275,11 +299,13 @@ grant select on table
   public.skills,
   public.rubrics,
   public.evaluations,
-  public.evaluation_scores
+  public.evaluation_scores,
+  public.ai_feedback
 to authenticated;
 
 grant insert, update on table public.evaluations to authenticated;
 grant insert, update on table public.evaluation_scores to authenticated;
+grant insert, update on table public.ai_feedback to authenticated;
 grant insert, update on table public.profiles to authenticated;
 grant insert, update on table public.student_groups to authenticated;
 grant insert, update on table public.group_teachers to authenticated;
@@ -526,7 +552,6 @@ for update
 using (public.can_manage_group(group_id))
 with check (
   public.can_manage_group(group_id)
-  and status <> 'locked'
 );
 
 create policy "score read mirrors evaluation read"
@@ -567,6 +592,65 @@ for update
 using (public.evaluation_is_editable(evaluation_id))
 with check (public.evaluation_is_editable(evaluation_id));
 
+create policy "ai feedback read mirrors student access"
+on public.ai_feedback
+for select
+using (
+  exists (
+    select 1
+    from public.students s
+    where s.id = ai_feedback.student_id
+      and (
+        public.can_manage_group(s.group_id)
+        or s.email = (
+          select p.email
+          from public.profiles p
+          where p.id = auth.uid()
+        )
+        or exists (
+          select 1
+          from public.student_guardians sg
+          join public.guardians g on g.id = sg.guardian_id
+          join public.profiles p on p.email = g.email
+          where sg.student_id = s.id
+            and p.id = auth.uid()
+        )
+      )
+  )
+);
+
+create policy "ai feedback write by assigned staff"
+on public.ai_feedback
+for insert
+with check (
+  exists (
+    select 1
+    from public.students s
+    where s.id = ai_feedback.student_id
+      and public.can_manage_group(s.group_id)
+  )
+);
+
+create policy "ai feedback update by assigned staff"
+on public.ai_feedback
+for update
+using (
+  exists (
+    select 1
+    from public.students s
+    where s.id = ai_feedback.student_id
+      and public.can_manage_group(s.group_id)
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.students s
+    where s.id = ai_feedback.student_id
+      and public.can_manage_group(s.group_id)
+  )
+);
+
 create policy "notification queue by orientadora only"
 on public.notification_queue
 for all
@@ -578,6 +662,7 @@ create index if not exists idx_students_specialty_id on public.students (special
 create index if not exists idx_group_teachers_group_id on public.group_teachers (group_id);
 create index if not exists idx_skills_specialty_id on public.skills (specialty_id);
 create index if not exists idx_evaluations_stage_group on public.evaluations (stage_id, group_id);
+create index if not exists idx_ai_feedback_student_stage on public.ai_feedback (student_id, stage_id);
 create index if not exists idx_notification_queue_status on public.notification_queue (delivery_status);
 
 drop trigger if exists lock_evaluations_before_update on public.evaluations;

@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "dev": "npm --prefix Internship-Management-System run dev -- --host 127.0.0.1 --port 5173",
+    "build": "npm --prefix Internship-Management-System run build",
+    "preview": "npm --prefix Internship-Management-System run preview --"
+  },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.4",
     "tailwindcss": "^4.2.4"

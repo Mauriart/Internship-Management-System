@@ -14,6 +14,7 @@ export function GradebookTable({
   rows,
   onScoreChange,
   onObservationChange,
+  onObservationBlur,
   disabled,
   selectedRowIndex,
   onSelectRow,
@@ -49,11 +50,14 @@ export function GradebookTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row, rowIndex) => (
+          {rows.map((row, rowIndex) => {
+            const sourceIndex = row.rowIndex ?? rowIndex;
+
+            return (
             <TableRow
               key={row.student.id}
-              className={selectedRowIndex === rowIndex ? "bg-accent/20 hover:bg-accent/20" : ""}
-              onClick={() => onSelectRow(rowIndex)}
+              className={selectedRowIndex === sourceIndex ? "bg-accent/20 hover:bg-accent/20" : ""}
+              onClick={() => onSelectRow(sourceIndex)}
             >
               <TableCell className="sticky left-0 z-10 bg-white">
                 <div>
@@ -64,7 +68,7 @@ export function GradebookTable({
 
               {skills.map((skill) => {
                 const isActive =
-                  activeCell?.rowIndex === rowIndex && activeCell?.skillId === skill.id;
+                  activeCell?.rowIndex === sourceIndex && activeCell?.skillId === skill.id;
 
                 return (
                   <TableCell key={skill.id} className="p-1">
@@ -74,8 +78,8 @@ export function GradebookTable({
                       }`}
                       onClick={(event) => {
                         event.stopPropagation();
-                        onSelectRow(rowIndex);
-                        setActiveCell({ rowIndex, skillId: skill.id });
+                        onSelectRow(sourceIndex);
+                        setActiveCell({ rowIndex: sourceIndex, skillId: skill.id });
                       }}
                     >
                       {[1, 2, 3].map((value) => {
@@ -93,9 +97,9 @@ export function GradebookTable({
                             }`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              onSelectRow(rowIndex);
-                              setActiveCell({ rowIndex, skillId: skill.id });
-                              onScoreChange(rowIndex, skill.id, value);
+                              onSelectRow(sourceIndex);
+                              setActiveCell({ rowIndex: sourceIndex, skillId: skill.id });
+                              onScoreChange(sourceIndex, skill.id, value);
                             }}
                           >
                             {value}
@@ -116,13 +120,15 @@ export function GradebookTable({
                   placeholder="Observaciones para seguimiento, visita o cierre"
                   onClick={(event) => {
                     event.stopPropagation();
-                    onSelectRow(rowIndex);
+                    onSelectRow(sourceIndex);
                   }}
-                  onChange={(event) => onObservationChange(rowIndex, event.target.value)}
+                  onChange={(event) => onObservationChange(sourceIndex, event.target.value)}
+                  onBlur={() => onObservationBlur?.(sourceIndex)}
                 />
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
     </section>
